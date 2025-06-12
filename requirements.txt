@@ -1,0 +1,6 @@
+streamlit
+pandas
+pdfplumber
+PyMuPDF
+google-api-python-client
+python-dateutil
