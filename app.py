@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 import os
+import json
 from pdf_processor import PDFProcessor
 from date_parser import DateParser
 from google_sheets_client import GoogleSheetsClient
@@ -14,15 +15,45 @@ st.set_page_config(
     layout="wide"
 )
 
+def load_persistent_config():
+    """Load configuration from persistent storage."""
+    config_file = "app_config.json"
+    default_config = {
+        "credentials": "",
+        "sheets_url": "",
+        "worksheet_name": "Sheet1"
+    }
+    
+    try:
+        if os.path.exists(config_file):
+            with open(config_file, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    
+    return default_config
+
+def save_persistent_config(config):
+    """Save configuration to persistent storage."""
+    config_file = "app_config.json"
+    try:
+        with open(config_file, 'w') as f:
+            json.dump(config, f)
+    except Exception:
+        pass
+
 def main():
     st.title("🎂 Client Birthday PDF to Google Sheets")
     st.markdown("Upload a PDF file containing client birthday information to automatically extract and update your Google Sheets.")
+    
+    # Load persistent configuration
+    persistent_config = load_persistent_config()
     
     # Initialize session state
     if 'processed_data' not in st.session_state:
         st.session_state.processed_data = None
     if 'google_sheets_url' not in st.session_state:
-        st.session_state.google_sheets_url = ""
+        st.session_state.google_sheets_url = persistent_config.get("sheets_url", "")
     
     # Sidebar for Google Sheets configuration
     with st.sidebar:
@@ -42,42 +73,43 @@ def main():
             `your-service@project-name.iam.gserviceaccount.com`
             """)
         
-        # Initialize persistent storage for credentials
-        if 'saved_credentials' not in st.session_state:
-            st.session_state.saved_credentials = ""
-        if 'saved_sheets_url' not in st.session_state:
-            st.session_state.saved_sheets_url = ""
-        if 'saved_worksheet_name' not in st.session_state:
-            st.session_state.saved_worksheet_name = "Sheet1"
+        # Initialize persistent storage using file system
+        saved_credentials = persistent_config.get("credentials", "")
+        saved_sheets_url = persistent_config.get("sheets_url", "")
+        saved_worksheet_name = persistent_config.get("worksheet_name", "Sheet1")
         
         # Show current saved status with better organization
-        if st.session_state.saved_credentials or st.session_state.saved_sheets_url:
+        if saved_credentials or saved_sheets_url:
             st.success("✅ Configuration saved for future sessions")
             
             # Settings management section
             with st.expander("⚙️ Manage Saved Settings"):
                 col1, col2 = st.columns(2)
                 with col1:
-                    if st.session_state.saved_credentials:
+                    if saved_credentials:
                         st.write("**Credentials:** Saved")
                         if st.button("Clear Credentials"):
-                            st.session_state.saved_credentials = ""
+                            config = persistent_config.copy()
+                            config["credentials"] = ""
+                            save_persistent_config(config)
                             st.rerun()
                     else:
                         st.write("**Credentials:** Not saved")
                 
                 with col2:
-                    if st.session_state.saved_sheets_url:
+                    if saved_sheets_url:
                         st.write("**Sheets URL:** Saved")
                         if st.button("Clear URL"):
-                            st.session_state.saved_sheets_url = ""
+                            config = persistent_config.copy()
+                            config["sheets_url"] = ""
+                            save_persistent_config(config)
                             st.session_state.google_sheets_url = ""
                             st.rerun()
                     else:
                         st.write("**Sheets URL:** Not saved")
         
         # Credentials input - only show if not saved
-        if not st.session_state.saved_credentials:
+        if not saved_credentials:
             credentials_json = st.text_area(
                 "Google Service Account JSON",
                 placeholder='Paste your complete JSON credentials here...',
@@ -85,19 +117,19 @@ def main():
                 help="Paste the entire JSON content from your downloaded service account key file"
             )
         else:
-            credentials_json = st.session_state.saved_credentials
+            credentials_json = saved_credentials
         
         # Validate and store credentials
         if credentials_json.strip():
             try:
-                import json
                 json.loads(credentials_json)
-                import os
                 os.environ['GOOGLE_SERVICE_ACCOUNT_JSON'] = credentials_json
                 
-                # Save credentials to session state if not already saved
-                if not st.session_state.saved_credentials:
-                    st.session_state.saved_credentials = credentials_json
+                # Save credentials to persistent storage if not already saved
+                if not saved_credentials:
+                    config = persistent_config.copy()
+                    config["credentials"] = credentials_json
+                    save_persistent_config(config)
                     st.success("Credentials saved successfully for future sessions")
                 else:
                     st.success("Credentials loaded successfully")
@@ -105,7 +137,7 @@ def main():
                 st.error("Invalid JSON format. Please check your credentials.")
         
         # Google Sheets URL input with persistent storage
-        if not st.session_state.saved_sheets_url:
+        if not saved_sheets_url:
             sheets_url = st.text_input(
                 "Google Sheets URL",
                 value=st.session_state.google_sheets_url,
@@ -113,26 +145,30 @@ def main():
                 help="Paste the URL of your Google Sheets document"
             )
         else:
-            sheets_url = st.session_state.saved_sheets_url
+            sheets_url = saved_sheets_url
             st.info(f"Using saved Google Sheets URL")
         
         # Save URL if entered and not already saved
-        if sheets_url and sheets_url != st.session_state.saved_sheets_url:
-            if not st.session_state.saved_sheets_url:
-                st.session_state.saved_sheets_url = sheets_url
+        if sheets_url and sheets_url != saved_sheets_url:
+            if not saved_sheets_url:
+                config = persistent_config.copy()
+                config["sheets_url"] = sheets_url
+                save_persistent_config(config)
                 st.success("Google Sheets URL saved for future sessions")
             st.session_state.google_sheets_url = sheets_url
         
         # Worksheet name with persistent storage
         worksheet_name = st.text_input(
             "Worksheet Name",
-            value=st.session_state.saved_worksheet_name,
+            value=saved_worksheet_name,
             help="Name of the worksheet to update"
         )
         
         # Save worksheet name if changed
-        if worksheet_name != st.session_state.saved_worksheet_name:
-            st.session_state.saved_worksheet_name = worksheet_name
+        if worksheet_name != saved_worksheet_name:
+            config = persistent_config.copy()
+            config["worksheet_name"] = worksheet_name
+            save_persistent_config(config)
     
     # Main upload area
     uploaded_file = st.file_uploader(
